@@ -72,6 +72,8 @@ import org.apache.gravitino.utils.HierarchicalSchemaUtil;
 import org.apache.iceberg.SnapshotRef;
 import org.apache.iceberg.TableMetadata;
 import org.apache.iceberg.catalog.Namespace;
+import org.apache.gravitino.iceberg.service.labels.IcebergLabels;
+import org.apache.gravitino.iceberg.service.labels.TagLabelResolver;
 import org.apache.iceberg.catalog.TableIdentifier;
 import org.apache.iceberg.rest.RESTUtil;
 import org.apache.iceberg.rest.requests.CreateTableRequest;
@@ -351,7 +353,9 @@ public class IcebergTableOperations {
             if (IcebergRESTUtils.SnapshotMode.REFS.getValue().equals(snapshots)) {
               loadTableResponse = filterSnapshotsByRefs(loadTableResponse);
             }
-            return buildResponseWithETag(loadTableResponse, etag);
+            IcebergLabels labels =
+                resolveLabelsQuietly(catalogName, tableIdentifier, loadTableResponse);
+            return buildResponseWithETag(loadTableResponse, labels, etag);
           });
     } catch (Exception e) {
       return IcebergExceptionMapper.toRESTResponse(e);
@@ -593,6 +597,27 @@ public class IcebergTableOperations {
   private static Response buildResponseWithETag(
       LoadTableResponse loadTableResponse, Optional<EntityTag> etag) {
     return IcebergRESTUtils.buildResponseWithETag(loadTableResponse, etag);
+  }
+
+  private static Response buildResponseWithETag(
+      LoadTableResponse loadTableResponse, IcebergLabels labels, Optional<EntityTag> etag) {
+    return IcebergRESTUtils.buildResponseWithETag(loadTableResponse, labels, etag);
+  }
+
+  /**
+   * Resolves Gravitino tags into IRC labels, best-effort: any failure logs and yields {@code null}
+   * so label enrichment never breaks table loading. Returns {@code null} when there are no labels.
+   */
+  private static IcebergLabels resolveLabelsQuietly(
+      String catalogName, TableIdentifier tableIdentifier, LoadTableResponse loadTableResponse) {
+    try {
+      return TagLabelResolver.fromEnv()
+          .resolveTableLabels(
+              catalogName, tableIdentifier, loadTableResponse.tableMetadata().schema());
+    } catch (Exception e) {
+      LOG.warn("Failed to resolve tag labels for table {}", tableIdentifier, e);
+      return null;
+    }
   }
 
   @VisibleForTesting
