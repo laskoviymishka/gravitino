@@ -19,6 +19,8 @@
 package org.apache.gravitino.iceberg.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
+import org.apache.gravitino.iceberg.service.labels.IcebergLabels;
 import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableMap;
 import java.io.IOException;
@@ -306,6 +308,33 @@ public class IcebergRESTUtils {
       LoadTableResponse loadTableResponse, Optional<EntityTag> etag) {
     Response.ResponseBuilder responseBuilder =
         Response.ok(loadTableResponse, MediaType.APPLICATION_JSON_TYPE);
+    etag.ifPresent(responseBuilder::tag);
+    return responseBuilder.build();
+  }
+
+  /**
+   * Builds an OK response with the given ETag header, augmenting the serialized body with a
+   * catalog-provided {@code labels} field (IRC labels, see <a
+   * href="https://github.com/apache/iceberg/pull/15750">apache/iceberg#15750</a>). Released
+   * iceberg-core does not carry a {@code labels} field, so the response is serialized to a JSON
+   * tree and the field is injected before writing. The ETag is unchanged: labels are ephemeral
+   * catalog enrichment, not table state.
+   *
+   * @param loadTableResponse the table response to include in the body
+   * @param labels the resolved labels; when {@code null} or empty, no {@code labels} field is added
+   * @param etag the pre-computed ETag
+   * @return a Response with the ETag header set if etag is present
+   */
+  public static Response buildResponseWithETag(
+      LoadTableResponse loadTableResponse, IcebergLabels labels, Optional<EntityTag> etag) {
+    if (labels == null || labels.isEmpty()) {
+      return buildResponseWithETag(loadTableResponse, etag);
+    }
+    ObjectMapper mapper = IcebergObjectMapper.getInstance();
+    ObjectNode body = mapper.valueToTree(loadTableResponse);
+    body.set("labels", labels.toJson(mapper));
+    Response.ResponseBuilder responseBuilder =
+        Response.ok(body.toString(), MediaType.APPLICATION_JSON_TYPE);
     etag.ifPresent(responseBuilder::tag);
     return responseBuilder.build();
   }
